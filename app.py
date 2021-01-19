@@ -35,6 +35,7 @@ color2Blue = color2 & 255
 incrementRed = (color1Red - color2Red) / LED_STRIPES_LENGTH
 incrementGreen = (color1Green - color2Green) / LED_STRIPES_LENGTH
 incrementBlue = (color1Blue - color2Blue) / LED_STRIPES_LENGTH
+colorGradient = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
 POWER_PIN = 4
 SOUND_PIN = 17
@@ -46,10 +47,11 @@ GPIO.setup(SOUND_PIN, GPIO.OUT)
 form_1 = pyaudio.paInt16  # 16-bit resolution
 chans = 1  # 1 channel
 samp_rate = 44100  # 44.1kHz sampling rate
-chunk = 8192  # 2^12 samples for buffer
+chunk = 2048  # 2^12 samples for buffer
 dev_index = 0  # device index found by p.get_device_info_by_index(ii)
 meansMax = 0.007
 meansMin = 0
+# meansCorrection = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 meansCorrection = [0.00343, 0.00352, 0.0013, 0.00108, 0.000623, 0.000253, 0.000174, 0.0000929, 0.0000563, 0.0000409,
                    0.0000347, 0.0000283]
 
@@ -65,8 +67,12 @@ class AudioSampler(threading.Thread):
 
 
 def hex_to_rgb(value):
+    # print(value)
     value = value.lstrip('#')
-    return list(int(value[i:i + 2], 16) for i in (0, 2, 4))
+    # print(value)
+    rgb = list(int(value[i:i + 2], 16) for i in (0, 2, 4))
+    # print(rgb[0], " ", rgb[1], " ", rgb[2])
+    return rgb
 
 
 def powerOn():
@@ -78,8 +84,16 @@ def powerOff():
 
 
 def getColorBetweenBounds(colorIndex):
-    return Color(int(color2Red + colorIndex * incrementRed), int(color2Green + colorIndex * incrementGreen),
-                 int(color1Blue + colorIndex * incrementBlue))
+    # print("red", int(color2Red + colorIndex * incrementRed), ", red2 ", color2Red, ", index ", colorIndex, ", inc ",
+    #      incrementRed)
+    # print("green", int(color2Green + colorIndex * incrementGreen), ", green2 ", color2Green, ", index ", colorIndex,
+    #      ", inc ", incrementGreen)
+    # print("blue", int(color2Blue + colorIndex * incrementBlue), ", blue2 ", color2Blue, ", index ", colorIndex,
+    #      ", inc ", incrementBlue)
+    color = (int(color2Red + colorIndex * incrementRed) << 16) + (
+            int(color2Green + colorIndex * incrementGreen) << 8) + int(color2Blue + colorIndex * incrementBlue)
+    # print("color: ", bin(color))
+    colorGradient[colorIndex] = color
 
 
 def lightStripe(strip, stripeIndex, length=LED_STRIPES_LENGTH):
@@ -87,13 +101,13 @@ def lightStripe(strip, stripeIndex, length=LED_STRIPES_LENGTH):
         if (stripeIndex % 2) == 0:
             for i in range(LED_STRIPES_LENGTH):
                 if i <= length:
-                    strip.setPixelColor(stripeIndex * LED_STRIPES_LENGTH + i, getColorBetweenBounds(i))
+                    strip.setPixelColor(stripeIndex * LED_STRIPES_LENGTH + i, colorGradient[i])
                 else:
                     strip.setPixelColor(stripeIndex * LED_STRIPES_LENGTH + i, Color(0, 0, 0))
         else:
             for i in range(LED_STRIPES_LENGTH):
                 if i <= length:
-                    strip.setPixelColor(stripeIndex * LED_STRIPES_LENGTH + 9 - i, getColorBetweenBounds(i))
+                    strip.setPixelColor(stripeIndex * LED_STRIPES_LENGTH + 9 - i, colorGradient[i])
                 else:
                     strip.setPixelColor(stripeIndex * LED_STRIPES_LENGTH + 9 - i, Color(0, 0, 0))
 
@@ -119,64 +133,66 @@ def audioSampling():
     meansMax = 0.007
 
     while state == 'equalizer':
-        try:
-            # record data chunk
-            stream.start_stream()
-            data = np.fromstring(stream.read(chunk), dtype=np.int16)
-            stream.stop_stream()
+        # record data chunk
+        stream.start_stream()
+        data = np.fromstring(stream.read(chunk), dtype=np.int16)
+        stream.stop_stream()
 
-            # (USB=5V, so 15 bits are used (the 16th for negatives)) and the manufacturer microphone sensitivity corrections
-            data = ((data / np.power(2.0, 15)) * 5.25) * mic_sens_corr
+        # (USB=5V, so 15 bits are used (the 16th for negatives)) and the manufacturer microphone sensitivity corrections
+        data = ((data / np.power(2.0, 15)) * 5.25) * mic_sens_corr
 
-            # compute FFT parameters
-            f_vec = samp_rate * np.arange(chunk / 2) / chunk  # frequency vector based on window size and sample rate
-            fft_data = (np.abs(np.fft.fft(data))[0:int(np.floor(chunk / 2))]) / chunk
-            fft_data[1:] = 2 * fft_data[1:]
+        # compute FFT parameters
+        f_vec = samp_rate * np.arange(chunk / 2) / chunk  # frequency vector based on window size and sample rate
+        fft_data = (np.abs(np.fft.fft(data))[0:int(np.floor(chunk / 2))]) / chunk
+        fft_data[1:] = 2 * fft_data[1:]
 
-            log10Array = []
-            audioLvlsArray = []
-            freq_index = 0
-            for freq in f_vec:
-                if (freq > 20) & (freq < 20000):
-                    log10Array.append(math.log10(freq))
-                    audioLvlsArray.append(fft_data[freq_index] * 1000)
-                freq_index += 1
+        log10Array = []
+        audioLvlsArray = []
+        freq_index = 0
+        for freq in f_vec:
+            if (freq > 20) & (freq < 20000):
+                log10Array.append(math.log10(freq))
+                audioLvlsArray.append(fft_data[freq_index] * 1000)
+            freq_index += 1
 
-            freq_increments = (log10Array[len(log10Array) - 1] - log10Array[0]) / 12
-            freqs = [[], [], [], [], [], [], [], [], [], [], [], []]
-            freq_index = 0
-            for freqLog in log10Array:
-                column = int((freqLog - log10Array[0]) / freq_increments)
-                if column > 11:
-                    column = 11
-                freqs[column].append(audioLvlsArray[freq_index])
-                freq_index += 1
+        freq_increments = (log10Array[len(log10Array) - 1] - log10Array[0]) / 12
+        freqs = [[], [], [], [], [], [], [], [], [], [], [], []]
+        freq_index = 0
+        for freqLog in log10Array:
+            column = int((freqLog - log10Array[0]) / freq_increments)
+            if column > 11:
+                column = 11
+            freqs[column].append(audioLvlsArray[freq_index])
+            freq_index += 1
 
-            means = []
-            stripIndex = 0
-            for lvls in freqs:
-                means.append(np.mean(lvls) - meansCorrection[stripIndex])
-                stripIndex += 1
+        means = []
+        stripIndex = 0
+        for lvls in freqs:
+            means.append(np.mean(lvls) - meansCorrection[stripIndex])
+            stripIndex += 1
 
-            meansRange = meansMax - meansMin
-            meansRangeInc = meansRange / LED_STRIPES_LENGTH
+        meansRange = meansMax - meansMin
+        meansRangeInc = meansRange / LED_STRIPES_LENGTH
 
-            # print("start")
-            for i in range(LED_STRIPES_COUNT):
-                lvl = int((means[i] - meansMin) / meansRangeInc)
-                if lvl < 0:
-                    lvl = 0
-                elif lvl > 9:
-                    lvl = 9
-                lightStripe(STRIP, i, lvl)
-            STRIP.show()
-            # print("stop")
-        except:
-            stream.close()
-            audio.terminate()
+        # print("start")
+        for i in range(LED_STRIPES_COUNT):
+            lvl = int((means[i] - meansMin) / meansRangeInc)
+            if lvl < 0:
+                lvl = 0
+            elif lvl > 9:
+                lvl = 9
+            lightStripe(STRIP, i, lvl)
+        STRIP.show()
+        # print("stop")
 
     stream.close()
     audio.terminate()
+
+
+def updateColor():
+    for i in range(LED_STRIPES_LENGTH):
+        # print("index ", i)
+        getColorBetweenBounds(i)
 
 
 @app.route('/toggle/sound')
@@ -197,6 +213,8 @@ def updateColor1(color):
     global incrementRed
     global incrementGreen
     global incrementBlue
+    prevState = state
+    state = "waiting"
     rgb1 = hex_to_rgb(color)
     color1Red = rgb1[0]
     color1Green = rgb1[1]
@@ -205,8 +223,7 @@ def updateColor1(color):
     incrementRed = (color1Red - color2Red) / LED_STRIPES_LENGTH
     incrementGreen = (color1Green - color2Green) / LED_STRIPES_LENGTH
     incrementBlue = (color1Blue - color2Blue) / LED_STRIPES_LENGTH
-    prevState = state
-    state = "waiting"
+    updateColor()
     light(prevState)
     return color
 
@@ -221,6 +238,8 @@ def updateColor2(color):
     global incrementRed
     global incrementGreen
     global incrementBlue
+    prevState = state
+    state = "waiting"
     rgb2 = hex_to_rgb(color)
     color2Red = rgb2[0]
     color2Green = rgb2[1]
@@ -229,8 +248,7 @@ def updateColor2(color):
     incrementRed = (color1Red - color2Red) / LED_STRIPES_LENGTH
     incrementGreen = (color1Green - color2Green) / LED_STRIPES_LENGTH
     incrementBlue = (color1Blue - color2Blue) / LED_STRIPES_LENGTH
-    prevState = state
-    state = "waiting"
+    updateColor()
     light(prevState)
     return color
 
@@ -295,6 +313,7 @@ def light(lightOn):
 if __name__ == '__main__':
     # Intialize the library (must be called once before other functions).
     STRIP.begin()
+    updateColor()
 
 try:
     app.run(debug=False, host='0.0.0.0')
