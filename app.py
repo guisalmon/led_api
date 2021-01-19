@@ -48,6 +48,10 @@ chans = 1  # 1 channel
 samp_rate = 44100  # 44.1kHz sampling rate
 chunk = 8192  # 2^12 samples for buffer
 dev_index = 0  # device index found by p.get_device_info_by_index(ii)
+meansMax = 0.007
+meansMin = 0
+meansCorrection = [0.00343, 0.00352, 0.0013, 0.00108, 0.000623, 0.000253, 0.000174, 0.0000929, 0.0000563, 0.0000409,
+                   0.0000347, 0.0000283]
 
 
 class AudioSampler(threading.Thread):
@@ -115,93 +119,61 @@ def audioSampling():
     meansMax = 0.007
 
     while state == 'equalizer':
-        # record data chunk
-        stream.start_stream()
-        data = np.fromstring(stream.read(chunk), dtype=np.int16)
-        stream.stop_stream()
+        try:
+            # record data chunk
+            stream.start_stream()
+            data = np.fromstring(stream.read(chunk), dtype=np.int16)
+            stream.stop_stream()
 
-        # (USB=5V, so 15 bits are used (the 16th for negatives)) and the manufacturer microphone sensitivity corrections
-        data = ((data / np.power(2.0, 15)) * 5.25) * mic_sens_corr
+            # (USB=5V, so 15 bits are used (the 16th for negatives)) and the manufacturer microphone sensitivity corrections
+            data = ((data / np.power(2.0, 15)) * 5.25) * mic_sens_corr
 
-        # compute FFT parameters
-        f_vec = samp_rate * np.arange(chunk / 2) / chunk  # frequency vector based on window size and sample rate
-        fft_data = (np.abs(np.fft.fft(data))[0:int(np.floor(chunk / 2))]) / chunk
-        fft_data[1:] = 2 * fft_data[1:]
+            # compute FFT parameters
+            f_vec = samp_rate * np.arange(chunk / 2) / chunk  # frequency vector based on window size and sample rate
+            fft_data = (np.abs(np.fft.fft(data))[0:int(np.floor(chunk / 2))]) / chunk
+            fft_data[1:] = 2 * fft_data[1:]
 
-        log10Array = []
-        audioLvlsArray = []
-        freq_index = 0
-        for freq in f_vec:
-            if (freq > 20) & (freq < 20000):
-                log10Array.append(math.log10(freq))
-                audioLvlsArray.append(fft_data[freq_index] * 1000)
-            freq_index += 1
+            log10Array = []
+            audioLvlsArray = []
+            freq_index = 0
+            for freq in f_vec:
+                if (freq > 20) & (freq < 20000):
+                    log10Array.append(math.log10(freq))
+                    audioLvlsArray.append(fft_data[freq_index] * 1000)
+                freq_index += 1
 
-        freq_increments = (log10Array[len(log10Array) - 1] - log10Array[0]) / 12
-        freq1 = []
-        freq2 = []
-        freq3 = []
-        freq4 = []
-        freq5 = []
-        freq6 = []
-        freq7 = []
-        freq8 = []
-        freq9 = []
-        freq10 = []
-        freq11 = []
-        freq12 = []
-        freq_index = 0
-        # print("start")
-        for freqLog in log10Array:
-            v = (freqLog - log10Array[0]) / freq_increments
-            # print(audioLvlsArray[freq_index])
-            if v <= 1:
-                freq1.append(audioLvlsArray[freq_index])
-            elif v <= 2:
-                freq2.append(audioLvlsArray[freq_index])
-            elif v <= 3:
-                freq3.append(audioLvlsArray[freq_index])
-            elif v <= 4:
-                freq4.append(audioLvlsArray[freq_index])
-            elif v <= 5:
-                freq5.append(audioLvlsArray[freq_index])
-            elif v <= 6:
-                freq6.append(audioLvlsArray[freq_index])
-            elif v <= 7:
-                freq7.append(audioLvlsArray[freq_index])
-            elif v <= 8:
-                freq8.append(audioLvlsArray[freq_index])
-            elif v <= 9:
-                freq9.append(audioLvlsArray[freq_index])
-            elif v <= 10:
-                freq10.append(audioLvlsArray[freq_index])
-            elif v <= 11:
-                freq11.append(audioLvlsArray[freq_index])
-            elif v <= 12:
-                freq12.append(audioLvlsArray[freq_index])
+            freq_increments = (log10Array[len(log10Array) - 1] - log10Array[0]) / 12
+            freqs = [[], [], [], [], [], [], [], [], [], [], [], []]
+            freq_index = 0
+            for freqLog in log10Array:
+                column = int((freqLog - log10Array[0]) / freq_increments)
+                if column > 11:
+                    column = 11
+                freqs[column].append(audioLvlsArray[freq_index])
+                freq_index += 1
 
-            freq_index += 1
-        # print("stop")
+            means = []
+            stripIndex = 0
+            for lvls in freqs:
+                means.append(np.mean(lvls) - meansCorrection[stripIndex])
+                stripIndex += 1
 
-        means = [np.mean(freq1) - 0.00343, np.mean(freq2) - 0.00352, np.mean(freq3) - 0.0013,
-                 np.mean(freq4) - 0.00108, np.mean(freq5) - 0.000623, np.mean(freq6) - 0.000253,
-                 np.mean(freq7) - 0.000174, np.mean(freq8) - 0.0000929, np.mean(freq9) - 0.0000563,
-                 np.mean(freq10) - 0.0000409, np.mean(freq11) - 0.0000347, np.mean(freq12) - 0.0000283]
-        # meansMin = np.min(means)
-        meansMin = 0
-        meansRange = meansMax - meansMin
-        meansRangeInc = meansRange / LED_STRIPES_LENGTH
+            meansRange = meansMax - meansMin
+            meansRangeInc = meansRange / LED_STRIPES_LENGTH
 
-        # print("start")
-        for i in range(LED_STRIPES_COUNT):
-            lvl = int((means[i] - meansMin) / meansRangeInc)
-            if lvl < 0:
-                lvl = 0
-            elif lvl > 9:
-                lvl = 9
-            lightStripe(STRIP, i, lvl)
-        STRIP.show()
-        # print("stop")
+            # print("start")
+            for i in range(LED_STRIPES_COUNT):
+                lvl = int((means[i] - meansMin) / meansRangeInc)
+                if lvl < 0:
+                    lvl = 0
+                elif lvl > 9:
+                    lvl = 9
+                lightStripe(STRIP, i, lvl)
+            STRIP.show()
+            # print("stop")
+        except:
+            stream.close()
+            audio.terminate()
 
     stream.close()
     audio.terminate()
