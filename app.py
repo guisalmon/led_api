@@ -36,7 +36,9 @@ color2Blue = color2 & 255
 incrementRed = (color1Red - color2Red) / LED_STRIPES_LENGTH
 incrementGreen = (color1Green - color2Green) / LED_STRIPES_LENGTH
 incrementBlue = (color1Blue - color2Blue) / LED_STRIPES_LENGTH
-colorGradient = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+colorGradientRed = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+colorGradientGreen = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+colorGradientBlue = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
 POWER_PIN = 4
 SOUND_PIN = 17
@@ -57,7 +59,7 @@ freqMax = 8000
 form_1 = pyaudio.paInt16  # 16-bit resolution
 chans = 1  # 1 channel
 samp_rate = 44100  # 44.1kHz sampling rate
-chunk = 1024  # 2^12 samples for buffer
+chunk = 512  # 2^12 samples for buffer
 dev_index = 1  # device index found by p.get_device_info_by_index(ii)
 meansMax = 0.5
 meansMin = 0
@@ -121,23 +123,33 @@ def getColorBetweenBounds(colorIndex):
     color = (int(color2Red + colorIndex * incrementRed) << 16) + (
             int(color2Green + colorIndex * incrementGreen) << 8) + int(color2Blue + colorIndex * incrementBlue)
     # print("color: ", bin(color))
-    colorGradient[colorIndex] = color
+    colorGradientRed[colorIndex] = int(color2Red + colorIndex * incrementRed)
+    colorGradientGreen[colorIndex] = int(color2Green + colorIndex * incrementGreen)
+    colorGradientBlue[colorIndex] = int(color2Blue + colorIndex * incrementBlue)
 
 
 def lightStripe(strip, stripeIndex, length=LED_STRIPES_LENGTH):
     if stripeIndex < LED_COUNT / LED_STRIPES_LENGTH:
         if (stripeIndex % 2) == 0:
-            for i in range(LED_STRIPES_LENGTH):
-                if i <= length:
-                    strip.setPixelColor(stripeIndex * LED_STRIPES_LENGTH + i, colorGradient[i])
-                else:
-                    strip.setPixelColor(stripeIndex * LED_STRIPES_LENGTH + i, Color(0, 0, 0))
+            for i in range(1, LED_STRIPES_LENGTH + 1):
+                if (i <= length) & (i > 0):
+                    strip.setPixelColor(stripeIndex * LED_STRIPES_LENGTH + (i - 1),
+                                        colorWithIntensity(i - 1, (LED_STRIPES_LENGTH - (length - i))*length))
+                elif i > length:
+                    strip.setPixelColor(stripeIndex * LED_STRIPES_LENGTH + (i - 1), Color(0, 0, 0))
         else:
-            for i in range(LED_STRIPES_LENGTH):
-                if i <= length:
-                    strip.setPixelColor(stripeIndex * LED_STRIPES_LENGTH + 9 - i, colorGradient[i])
-                else:
-                    strip.setPixelColor(stripeIndex * LED_STRIPES_LENGTH + 9 - i, Color(0, 0, 0))
+            for i in range(1, LED_STRIPES_LENGTH + 1):
+                if (i <= length) & (i > 0):
+                    strip.setPixelColor(stripeIndex * LED_STRIPES_LENGTH + 10 - i,
+                                        colorWithIntensity(i - 1, (LED_STRIPES_LENGTH - (length - i))*length))
+                elif i > length:
+                    strip.setPixelColor(stripeIndex * LED_STRIPES_LENGTH + 10 - i, Color(0, 0, 0))
+
+
+def colorWithIntensity(index, strength):
+    return (int((colorGradientRed[index] / LED_STRIPES_LENGTH ** 2) * strength) << 16) \
+           + (int((colorGradientGreen[index] / LED_STRIPES_LENGTH ** 2) * strength) << 8) \
+           + int((colorGradientBlue[index] / LED_STRIPES_LENGTH ** 2) * strength)
 
 
 # Define functions which animate LEDs in various ways.
@@ -239,11 +251,11 @@ def audioSampling():
             elif (meanLvl > meanMaxLvls[index]) & autoMinMax:
                 meanMaxLvls[index] = meanLvl
             meansRange[index] = meanMaxLvls[index] - meanMinLvls[index]
-            lvl = int((means[index] - meanMinLvls[index]) / (meansRange[index] / LED_STRIPES_LENGTH))
+            lvl = int((means[index] - meanMinLvls[index]) / (meansRange[index] / (LED_STRIPES_LENGTH + 1)))
             if lvl < 0:
                 lvl = 0
-            elif lvl > 9:
-                lvl = 9
+            elif lvl > LED_STRIPES_LENGTH:
+                lvl = LED_STRIPES_LENGTH
             lightStripe(STRIP, index, lvl)
             index += 1
 
