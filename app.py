@@ -1,4 +1,3 @@
-import json
 import math
 import threading
 import time
@@ -14,7 +13,7 @@ app = Flask(__name__)
 LED_PIN = 18  # GPIO pin connected to the pixels (18 uses PWM!).
 LED_FREQ_HZ = 800000  # LED signal frequency in hertz (usually 800khz)
 LED_DMA = 10  # DMA channel to use for generating signal (try 10)
-LED_BRIGHTNESS = 127  # Set to 0 for darkest and 255 for brightest
+LED_BRIGHTNESS = 32  # Set to 0 for darkest and 255 for brightest
 LED_INVERT = False  # True to invert the signal (when using NPN transistor
 LED_CHANNEL = 0  # set to '1' for GPIOs 13, 19, 41, 45 or 53
 LED_STRIPES_LENGTH = 10
@@ -26,8 +25,8 @@ STRIP = Adafruit_NeoPixel(LED_COUNT, LED_PIN, LED_FREQ_HZ, LED_DMA, LED_INVERT, 
 STATES = ['dark', 'white', 'gradient', 'equalizer', 'color1', 'color2', 'noise_start', 'noise_end']
 state = 'dark'
 
-color1 = Color(244, 0, 121)
-color2 = Color(86, 137, 231)
+color1 = Color(175, 0, 255)
+color2 = Color(255, 0, 4)
 color1Red = (color1 & (255 << 16)) >> 16
 color1Green = (color1 & (255 << 8)) >> 8
 color1Blue = color1 & 255
@@ -48,7 +47,9 @@ GPIO.setup(SOUND_PIN, GPIO.OUT)
 
 # mic sensitivity correction and bit conversion
 # mic_sens_dBV = -47.0  # mic sensitivity in dBV + any gain
-mic_sens_dBV = -25.0  # mic sensitivity in dBV + any gain
+# mic_sens_dBV = -25.0  # mic sensitivity in dBV + any gain
+# mic_sens_dBV = 0  # mic sensitivity in dBV + any gain
+mic_sens_dBV = -10  # mic sensitivity in dBV + any gain
 mic_sens_corr = np.power(10.0, mic_sens_dBV / 20.0)  # calculate mic sensitivity conversion factor
 
 freqMin = 20
@@ -56,14 +57,21 @@ freqMax = 8000
 form_1 = pyaudio.paInt16  # 16-bit resolution
 chans = 1  # 1 channel
 samp_rate = 44100  # 44.1kHz sampling rate
-chunk = 512  # 2^12 samples for buffer
-dev_index = 0  # device index found by p.get_device_info_by_index(ii)
+chunk = 1024  # 2^12 samples for buffer
+dev_index = 1  # device index found by p.get_device_info_by_index(ii)
 meansMax = 0.5
 meansMin = 0
 # meansCorrection = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 # meansCorrection = [0.00343, 0.00352, 0.0013, 0.00108, 0.000623, 0.000253, 0.000174, 0.0000929, 0.0000563, 0.0000409,
 #                   0.0000347, 0.0000283]
-fftCorrection = [0] * (int(chunk / 2))
+fftCorrection = [0.0] * (int(chunk / 2))
+meanMinLvls = [10.0] * LED_STRIPES_COUNT
+meanMaxLvls = [-10.0] * LED_STRIPES_COUNT
+AUDIO_LVLS_MEM_SIZE = 1024
+autoMinMax = False
+
+audioMeanlvls = [[0.0] * LED_STRIPES_COUNT] * AUDIO_LVLS_MEM_SIZE
+audioMeanlvlsIndex = 0
 
 
 class AudioSampler(threading.Thread):
@@ -148,7 +156,7 @@ def noiseAcquisition():
                         frames_per_buffer=chunk)
 
     fft_avg = np.empty((int(chunk / 2), 0)).tolist()
-    fftCorrection = [None] * (int(chunk / 2))
+    fftCorrection = [0] * (int(chunk / 2))
 
     while state == 'noise_start':
         # record data chunk
@@ -167,18 +175,23 @@ def noiseAcquisition():
             fft_avg[i].append(fft_data[i])
 
     for i in range(len(fft_avg)):
-        avg = np.mean(fft_avg[i]) * 2
-        fftCorrection[i] = avg
-        print(avg)
+        fftCorrection[i] = np.median(fft_avg[i]) * 2
 
     stream.close()
     audio.terminate()
 
 
 def audioSampling():
+    global meanMinLvls
+    global means_buffer_index
+    global audioMeanlvlsIndex
+    global audioMeanlvls
+
     audio = pyaudio.PyAudio()
     stream = audio.open(format=form_1, rate=samp_rate, channels=chans, input_device_index=dev_index, input=True,
                         frames_per_buffer=chunk)
+
+    meanMinLvls = [10.0] * LED_STRIPES_COUNT
 
     while state == 'equalizer':
         # record data chunk
@@ -200,7 +213,8 @@ def audioSampling():
         for freq in f_vec:
             if (freq > freqMin) & (freq < freqMax):
                 log10Array.append(math.log10(freq))
-                audioLvlsArray.append((fft_data[freq_index] - fftCorrection[freq_index]) * 1000)
+                audioLvlsArray.append(
+                    (fft_data[freq_index] - fftCorrection[freq_index]) * 1000)
             freq_index += 1
 
         freq_increments = (log10Array[len(log10Array) - 1] - log10Array[0]) / 12
@@ -213,24 +227,38 @@ def audioSampling():
             freqs[column].append(audioLvlsArray[freq_index])
             freq_index += 1
 
-        means = []
+        means = [0.0] * LED_STRIPES_COUNT
+        meansRange = [0.0] * LED_STRIPES_COUNT
+        index = 0
+
         for lvls in freqs:
-            means.append(np.mean(lvls))
-
-        meansRange = meansMax - meansMin
-        meansRangeInc = meansRange / LED_STRIPES_LENGTH
-
-        # print("start")
-        for i in range(LED_STRIPES_COUNT):
-            lvl = int((means[i] - meansMin) / meansRangeInc)
+            meanLvl = np.mean(lvls)
+            means[index] = meanLvl
+            if (meanLvl < meanMinLvls[index]) & autoMinMax:
+                meanMinLvls[index] = meanLvl
+            elif (meanLvl > meanMaxLvls[index]) & autoMinMax:
+                meanMaxLvls[index] = meanLvl
+            meansRange[index] = meanMaxLvls[index] - meanMinLvls[index]
+            lvl = int((means[index] - meanMinLvls[index]) / (meansRange[index] / LED_STRIPES_LENGTH))
             if lvl < 0:
                 lvl = 0
             elif lvl > 9:
                 lvl = 9
-            lightStripe(STRIP, i, lvl)
+            lightStripe(STRIP, index, lvl)
+            index += 1
+
+        if audioMeanlvlsIndex == AUDIO_LVLS_MEM_SIZE:
+            audioMeanlvlsIndex = 0
+        audioMeanlvls[audioMeanlvlsIndex] = means
+        audioMeanlvlsIndex += 1
+
         STRIP.show()
         # print("stop")
 
+    # f = open('MinMax_{}'.format(datetime.now().strftime("%d-%m-%Y_%H:%M:%S")), "a")
+    # for i in range(LED_STRIPES_COUNT):
+    #    f.write('{index} - min: {min} - max: {max}'.format(index=i, min=meanMinLvls[i], max=meanMaxLvls[i]))
+    # f.close()
     stream.close()
     audio.terminate()
 
@@ -239,7 +267,8 @@ def jsonConfig():
     return jsonify(
         {"freqMin": freqMin, "freqMax": freqMax, "meansMax": meansMax, "meansMin": meansMin,
          "fftCorrection": fftCorrection, "color1": rgb_to_hex(color1Red, color1Green, color1Blue),
-         "color2": rgb_to_hex(color2Red, color2Green, color2Blue), "brightness": LED_BRIGHTNESS}
+         "color2": rgb_to_hex(color2Red, color2Green, color2Blue), "brightness": LED_BRIGHTNESS,
+         "meanMaxLvls": meanMaxLvls, "meanMinLvls": meanMinLvls, "autoMinMax": autoMinMax}
     )
 
 
@@ -248,10 +277,33 @@ def config():
     return jsonConfig()
 
 
+@app.route('/levels/toggle')
+def toggleAutoMinMax():
+    global autoMinMax
+    autoMinMax = not autoMinMax
+    return jsonConfig()
+
+
 @app.route('/config', methods=['POST'])
 def updateConfig():
-    newConfig = request.form
-    print(newConfig)
+    global freqMin
+    global freqMax
+    global meansMax
+    global meansMin
+    global fftCorrection
+    global LED_BRIGHTNESS
+
+    newConfig = request.get_json()
+
+    freqMin = newConfig.get("freqMin")
+    freqMax = newConfig.get("freqMax")
+    meansMax = newConfig.get("meansMax")
+    meansMin = newConfig.get("meansMin")
+    fftCorrection = newConfig.get("fftCorrection")
+    LED_BRIGHTNESS = newConfig.get("brightness")
+    updateColor1(newConfig.get("color1"))
+    updateColor2(newConfig.get("color2"))
+
     return jsonConfig()
 
 
@@ -329,6 +381,11 @@ def brightness(increment):
     return jsonConfig()
 
 
+@app.route('/levels/stripes')
+def levels():
+    return jsonify(memSize=AUDIO_LVLS_MEM_SIZE, audioLvls=audioMeanlvls)
+
+
 @app.route('/power/<state>')
 def power(state):
     if state == 'on':
@@ -380,6 +437,9 @@ if __name__ == '__main__':
     # Intialize the library (must be called once before other functions).
     STRIP.begin()
     updateColor()
+    p = pyaudio.PyAudio()
+    for i in range(p.get_device_count()):
+        print(p.get_device_info_by_index(i))
 
 try:
     app.run(debug=False, host='0.0.0.0')
