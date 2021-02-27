@@ -1,6 +1,7 @@
 import math
 import threading
 import time
+import faulthandler
 
 import RPi.GPIO as GPIO
 import numpy as np
@@ -13,18 +14,22 @@ app = Flask(__name__)
 LED_PIN = 18  # GPIO pin connected to the pixels (18 uses PWM!).
 LED_FREQ_HZ = 800000  # LED signal frequency in hertz (usually 800khz)
 LED_DMA = 10  # DMA channel to use for generating signal (try 10)
-LED_BRIGHTNESS = 32  # Set to 0 for darkest and 255 for brightest
+LED_BRIGHTNESS = 255  # Set to 0 for darkest and 255 for brightest
 LED_INVERT = False  # True to invert the signal (when using NPN transistor
 LED_CHANNEL = 0  # set to '1' for GPIOs 13, 19, 41, 45 or 53
 LED_STRIPES_LENGTH = 10
 LED_STRIPES_COUNT = 12
-LED_COUNT = LED_STRIPES_LENGTH * LED_STRIPES_COUNT  # Number of LED pixels.
+LED_CONTROL_COUNT = 2
+LED_LIGHT_COUNT = 10
+LED_EQ_COUNT = LED_STRIPES_LENGTH * LED_STRIPES_COUNT
+LED_COUNT = LED_EQ_COUNT + LED_CONTROL_COUNT + LED_LIGHT_COUNT  # Number of LED pixels.
 # Create NeoPixel object with appropriate configuration.
 STRIP = Adafruit_NeoPixel(LED_COUNT, LED_PIN, LED_FREQ_HZ, LED_DMA, LED_INVERT, LED_BRIGHTNESS, LED_CHANNEL)
 
 STATES = ['dark', 'white', 'gradient', 'equalizer', 'color1', 'color2', 'noise_start', 'noise_end']
 state = 'dark'
 
+brightnessEq = 32
 color1 = Color(175, 0, 255)
 color2 = Color(255, 0, 4)
 color1Red = (color1 & (255 << 16)) >> 16
@@ -107,10 +112,27 @@ def updateColor():
 
 def powerOn():
     GPIO.output(POWER_PIN, GPIO.LOW)
+    time.sleep(50 / 1000)
+    setPixelColor(LED_EQ_COUNT, color1, 16)
+    STRIP.show()
 
 
 def powerOff():
+    setPixelColor(LED_EQ_COUNT, Color(0, 0, 0), 16)
+    STRIP.show()
+    time.sleep(50 / 1000)
     GPIO.output(POWER_PIN, GPIO.HIGH)
+
+
+def setPixelColor(index, color, brightnessOverride=brightnessEq):
+    colorRed = (color & (255 << 16)) >> 16
+    colorGreen = (color & (255 << 8)) >> 8
+    colorBlue = color & 255
+    colorRed = (colorRed / 255) * brightnessOverride
+    colorGreen = (colorGreen / 255) * brightnessOverride
+    colorBlue = (colorBlue / 255) * brightnessOverride
+    color = (int(colorRed) << 16) + (int(colorGreen) << 8) + int(colorBlue)
+    STRIP.setPixelColor(index, color)
 
 
 def getColorBetweenBounds(colorIndex):
@@ -128,22 +150,22 @@ def getColorBetweenBounds(colorIndex):
     colorGradientBlue[colorIndex] = int(color2Blue + colorIndex * incrementBlue)
 
 
-def lightStripe(strip, stripeIndex, length=LED_STRIPES_LENGTH):
-    if stripeIndex < LED_COUNT / LED_STRIPES_LENGTH:
+def lightStripe(stripeIndex, length=LED_STRIPES_LENGTH):
+    if stripeIndex < LED_EQ_COUNT / LED_STRIPES_LENGTH:
         if (stripeIndex % 2) == 0:
             for i in range(1, LED_STRIPES_LENGTH + 1):
                 if (i <= length) & (i > 0):
-                    strip.setPixelColor(stripeIndex * LED_STRIPES_LENGTH + (i - 1),
+                    setPixelColor(stripeIndex * LED_STRIPES_LENGTH + (i - 1),
                                         colorWithIntensity(i - 1, (LED_STRIPES_LENGTH - (length - i))*length))
                 elif i > length:
-                    strip.setPixelColor(stripeIndex * LED_STRIPES_LENGTH + (i - 1), Color(0, 0, 0))
+                    setPixelColor(stripeIndex * LED_STRIPES_LENGTH + (i - 1), Color(0, 0, 0))
         else:
             for i in range(1, LED_STRIPES_LENGTH + 1):
                 if (i <= length) & (i > 0):
-                    strip.setPixelColor(stripeIndex * LED_STRIPES_LENGTH + 10 - i,
+                    setPixelColor(stripeIndex * LED_STRIPES_LENGTH + 10 - i,
                                         colorWithIntensity(i - 1, (LED_STRIPES_LENGTH - (length - i))*length))
                 elif i > length:
-                    strip.setPixelColor(stripeIndex * LED_STRIPES_LENGTH + 10 - i, Color(0, 0, 0))
+                    setPixelColor(stripeIndex * LED_STRIPES_LENGTH + 10 - i, Color(0, 0, 0))
 
 
 def colorWithIntensity(index, strength):
@@ -153,12 +175,10 @@ def colorWithIntensity(index, strength):
 
 
 # Define functions which animate LEDs in various ways.
-def colorWipe(strip, color, wait_ms=50):
-    """Wipe color across display a pixel at a time."""
-    for i in range(strip.numPixels()):
-        strip.setPixelColor(i, color)
-        strip.show()
-        time.sleep(wait_ms / 1000.0)
+def colorWipe(color):
+    for i in range(STRIP.numPixels()):
+        setPixelColor(i, color)
+    STRIP.show()
 
 
 def noiseAcquisition():
@@ -194,6 +214,7 @@ def noiseAcquisition():
 
 
 def audioSampling():
+    faulthandler.enable()
     global meanMinLvls
     global means_buffer_index
     global audioMeanlvlsIndex
@@ -256,7 +277,7 @@ def audioSampling():
                 lvl = 0
             elif lvl > LED_STRIPES_LENGTH:
                 lvl = LED_STRIPES_LENGTH
-            lightStripe(STRIP, index, lvl)
+            lightStripe(index, lvl)
             index += 1
 
         if audioMeanlvlsIndex == AUDIO_LVLS_MEM_SIZE:
@@ -279,9 +300,54 @@ def jsonConfig():
     return jsonify(
         {"freqMin": freqMin, "freqMax": freqMax, "meansMax": meansMax, "meansMin": meansMin,
          "fftCorrection": fftCorrection, "color1": rgb_to_hex(color1Red, color1Green, color1Blue),
-         "color2": rgb_to_hex(color2Red, color2Green, color2Blue), "brightness": LED_BRIGHTNESS,
-         "meanMaxLvls": meanMaxLvls, "meanMinLvls": meanMinLvls, "autoMinMax": autoMinMax}
+         "color2": rgb_to_hex(color2Red, color2Green, color2Blue), "brightness": brightnessEq,
+         "meanMaxLvls": meanMaxLvls, "meanMinLvls": meanMinLvls, "autoMinMax": autoMinMax, "source": dev_index}
     )
+
+
+@app.route('/ambient/on')
+def ambientOn():
+    for i in range(LED_EQ_COUNT + 3, LED_COUNT):
+        STRIP.setPixelColor(i, Color(255, 255, 255))
+    STRIP.show()
+    return jsonConfig()
+
+
+@app.route('/ambient/off')
+def ambientOff():
+    for i in range(LED_EQ_COUNT + 3, LED_COUNT):
+        STRIP.setPixelColor(i, Color(0, 0, 0))
+    STRIP.show()
+    return jsonConfig()
+
+
+@app.route('/source/toggle')
+def toggleSource():
+    global dev_index
+    global state
+    prevState = state
+    state = "wait"
+    if dev_index == 0:
+        dev_index = 1
+    elif dev_index == 1:
+        dev_index = 0
+    light(prevState)
+    return jsonConfig()
+
+
+@app.route('/sensibility/+')
+def increaseSensibility():
+    global meanMaxLvls
+    for i in range(len(meanMaxLvls)):
+        meanMaxLvls[i] = meanMaxLvls[i] / 2
+    return jsonConfig()
+
+
+@app.route('/sensibility/reset')
+def resetSensibility():
+    global meanMaxLvls
+    meanMaxLvls = [-10.0] * LED_STRIPES_COUNT
+    return jsonConfig()
 
 
 @app.route('/config', methods=['GET'])
@@ -303,7 +369,7 @@ def updateConfig():
     global meansMax
     global meansMin
     global fftCorrection
-    global LED_BRIGHTNESS
+    global brightnessEq
 
     newConfig = request.get_json()
 
@@ -312,7 +378,7 @@ def updateConfig():
     meansMax = newConfig.get("meansMax")
     meansMin = newConfig.get("meansMin")
     fftCorrection = newConfig.get("fftCorrection")
-    LED_BRIGHTNESS = newConfig.get("brightness")
+    brightnessEq = newConfig.get("brightness")
     updateColor1(newConfig.get("color1"))
     updateColor2(newConfig.get("color2"))
 
@@ -379,17 +445,15 @@ def updateColor2(color):
 
 @app.route('/brightness/<increment>')
 def brightness(increment):
-    global LED_BRIGHTNESS
+    global brightnessEq
     if increment == '+':
-        LED_BRIGHTNESS = LED_BRIGHTNESS + 10
-        if LED_BRIGHTNESS > 255:
-            LED_BRIGHTNESS = 255
+        brightnessEq = brightnessEq + 10
+        if brightnessEq > 255:
+            brightnessEq = 255
     elif increment == '-':
-        LED_BRIGHTNESS = LED_BRIGHTNESS - 10
-        if LED_BRIGHTNESS < 0:
-            LED_BRIGHTNESS = 0
-    STRIP.setBrightness(LED_BRIGHTNESS)
-    STRIP.show()
+        brightnessEq = brightnessEq - 10
+        if brightnessEq < 0:
+            brightnessEq = 0
     return jsonConfig()
 
 
@@ -414,14 +478,14 @@ def light(lightOn):
     if (lightOn in STATES) & (lightOn != state):
         state = lightOn
         if lightOn == 'dark':
-            colorWipe(STRIP, Color(0, 0, 0))
+            colorWipe(Color(0, 0, 0))
 
         elif lightOn == 'white':
-            colorWipe(STRIP, Color(255, 255, 255))
+            colorWipe(Color(255, 255, 255))
 
         elif lightOn == 'gradient':
             for i in range(LED_STRIPES_COUNT):
-                lightStripe(STRIP, i)
+                lightStripe(i)
             STRIP.show()
 
         elif lightOn == 'equalizer':
@@ -429,13 +493,13 @@ def light(lightOn):
             samplerThread.start()
 
         elif lightOn == 'color1':
-            for i in range(LED_COUNT):
-                STRIP.setPixelColor(i, color1)
+            for i in range(LED_EQ_COUNT):
+                setPixelColor(i, color1)
             STRIP.show()
 
         elif lightOn == 'color2':
-            for i in range(LED_COUNT):
-                STRIP.setPixelColor(i, color2)
+            for i in range(LED_EQ_COUNT):
+                setPixelColor(i, color2)
             STRIP.show()
 
         elif lightOn == 'noise_start':
@@ -452,11 +516,13 @@ if __name__ == '__main__':
     p = pyaudio.PyAudio()
     for i in range(p.get_device_count()):
         print(p.get_device_info_by_index(i))
+    setPixelColor(LED_EQ_COUNT+1, color2, 16)
+    STRIP.show()
 
 try:
     app.run(debug=False, host='0.0.0.0')
 
 except KeyboardInterrupt:
-    colorWipe(STRIP, Color(0, 0, 0), 10)
+    colorWipe(Color(0, 0, 0))
     powerOff()
     GPIO.cleanup()
