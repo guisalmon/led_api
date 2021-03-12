@@ -20,16 +20,17 @@ LED_CHANNEL = 0  # set to '1' for GPIOs 13, 19, 41, 45 or 53
 LED_STRIPES_LENGTH = 10
 LED_STRIPES_COUNT = 12
 LED_CONTROL_COUNT = 2
-LED_LIGHT_COUNT = 10
+LED_LIGHT_COUNT = 20
+LED_LIGHT_2_COUNT = 8
 LED_EQ_COUNT = LED_STRIPES_LENGTH * LED_STRIPES_COUNT
-LED_COUNT = LED_EQ_COUNT + LED_CONTROL_COUNT + LED_LIGHT_COUNT  # Number of LED pixels.
+LED_COUNT = LED_EQ_COUNT + LED_CONTROL_COUNT + LED_LIGHT_COUNT + LED_LIGHT_2_COUNT  # Number of LED pixels.
 # Create NeoPixel object with appropriate configuration.
 STRIP = Adafruit_NeoPixel(LED_COUNT, LED_PIN, LED_FREQ_HZ, LED_DMA, LED_INVERT, LED_BRIGHTNESS, LED_CHANNEL)
 
-STATES = ['dark', 'white', 'gradient', 'equalizer', 'color1', 'color2', 'noise_start', 'noise_end']
+STATES = ['dark', 'white', 'gradient', 'equalizer', 'color1', 'color2', 'noise_start', 'noise_end', "waiting"]
 state = 'dark'
 
-brightnessEq = 32
+brightnessEq = 63
 color1 = Color(175, 0, 255)
 color2 = Color(255, 0, 4)
 color1Red = (color1 & (255 << 16)) >> 16
@@ -41,9 +42,7 @@ color2Blue = color2 & 255
 incrementRed = (color1Red - color2Red) / LED_STRIPES_LENGTH
 incrementGreen = (color1Green - color2Green) / LED_STRIPES_LENGTH
 incrementBlue = (color1Blue - color2Blue) / LED_STRIPES_LENGTH
-colorGradientRed = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-colorGradientGreen = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-colorGradientBlue = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+colorGradient = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
 POWER_PIN = 4
 SOUND_PIN = 17
@@ -124,7 +123,7 @@ def powerOff():
     GPIO.output(POWER_PIN, GPIO.HIGH)
 
 
-def setPixelColor(index, color, brightnessOverride=brightnessEq):
+def setPixelColor(index, color, brightnessOverride):
     colorRed = (color & (255 << 16)) >> 16
     colorGreen = (color & (255 << 8)) >> 8
     colorBlue = color & 255
@@ -132,22 +131,13 @@ def setPixelColor(index, color, brightnessOverride=brightnessEq):
     colorGreen = (colorGreen / 255) * brightnessOverride
     colorBlue = (colorBlue / 255) * brightnessOverride
     color = (int(colorRed) << 16) + (int(colorGreen) << 8) + int(colorBlue)
+    # print(index, " : ", colorRed, " ", colorGreen, " ", colorBlue)
     STRIP.setPixelColor(index, color)
 
 
 def getColorBetweenBounds(colorIndex):
-    # print("red", int(color2Red + colorIndex * incrementRed), ", red2 ", color2Red, ", index ", colorIndex, ", inc ",
-    #      incrementRed)
-    # print("green", int(color2Green + colorIndex * incrementGreen), ", green2 ", color2Green, ", index ", colorIndex,
-    #      ", inc ", incrementGreen)
-    # print("blue", int(color2Blue + colorIndex * incrementBlue), ", blue2 ", color2Blue, ", index ", colorIndex,
-    #      ", inc ", incrementBlue)
-    color = (int(color2Red + colorIndex * incrementRed) << 16) + (
-            int(color2Green + colorIndex * incrementGreen) << 8) + int(color2Blue + colorIndex * incrementBlue)
-    # print("color: ", bin(color))
-    colorGradientRed[colorIndex] = int(color2Red + colorIndex * incrementRed)
-    colorGradientGreen[colorIndex] = int(color2Green + colorIndex * incrementGreen)
-    colorGradientBlue[colorIndex] = int(color2Blue + colorIndex * incrementBlue)
+    colorGradient[colorIndex] = (int(color2Red + colorIndex * incrementRed) << 16) + (
+                int(color2Green + colorIndex * incrementGreen) << 8) + int(color2Blue + colorIndex * incrementBlue)
 
 
 def lightStripe(stripeIndex, length=LED_STRIPES_LENGTH):
@@ -156,28 +146,29 @@ def lightStripe(stripeIndex, length=LED_STRIPES_LENGTH):
             for i in range(1, LED_STRIPES_LENGTH + 1):
                 if (i <= length) & (i > 0):
                     setPixelColor(stripeIndex * LED_STRIPES_LENGTH + (i - 1),
-                                        colorWithIntensity(i - 1, (LED_STRIPES_LENGTH - (length - i))*length))
+                                  colorGradient[i - 1],
+                                  (brightnessEq / LED_STRIPES_LENGTH ** 2) *
+                                      (LED_STRIPES_LENGTH - (length - i)) * length)
+
                 elif i > length:
-                    setPixelColor(stripeIndex * LED_STRIPES_LENGTH + (i - 1), Color(0, 0, 0))
+                    setPixelColor(stripeIndex * LED_STRIPES_LENGTH + (i - 1), Color(0, 0, 0),
+                                  brightnessEq)
         else:
             for i in range(1, LED_STRIPES_LENGTH + 1):
                 if (i <= length) & (i > 0):
                     setPixelColor(stripeIndex * LED_STRIPES_LENGTH + 10 - i,
-                                        colorWithIntensity(i - 1, (LED_STRIPES_LENGTH - (length - i))*length))
+                                  colorGradient[i - 1],
+                                  (brightnessEq / LED_STRIPES_LENGTH ** 2) *
+                                      (LED_STRIPES_LENGTH - (length - i)) * length)
                 elif i > length:
-                    setPixelColor(stripeIndex * LED_STRIPES_LENGTH + 10 - i, Color(0, 0, 0))
-
-
-def colorWithIntensity(index, strength):
-    return (int((colorGradientRed[index] / LED_STRIPES_LENGTH ** 2) * strength) << 16) \
-           + (int((colorGradientGreen[index] / LED_STRIPES_LENGTH ** 2) * strength) << 8) \
-           + int((colorGradientBlue[index] / LED_STRIPES_LENGTH ** 2) * strength)
+                    setPixelColor(stripeIndex * LED_STRIPES_LENGTH + 10 - i, Color(0, 0, 0),
+                                  brightnessEq)
 
 
 # Define functions which animate LEDs in various ways.
 def colorWipe(color):
     for i in range(STRIP.numPixels()):
-        setPixelColor(i, color)
+        setPixelColor(i, color, brightnessEq)
     STRIP.show()
 
 
@@ -446,6 +437,8 @@ def updateColor2(color):
 @app.route('/brightness/<increment>')
 def brightness(increment):
     global brightnessEq
+    prevState = state
+    light("waiting")
     if increment == '+':
         brightnessEq = brightnessEq + 10
         if brightnessEq > 255:
@@ -454,6 +447,7 @@ def brightness(increment):
         brightnessEq = brightnessEq - 10
         if brightnessEq < 0:
             brightnessEq = 0
+    light(prevState)
     return jsonConfig()
 
 
@@ -494,12 +488,12 @@ def light(lightOn):
 
         elif lightOn == 'color1':
             for i in range(LED_EQ_COUNT):
-                setPixelColor(i, color1)
+                setPixelColor(i, color1, brightnessEq)
             STRIP.show()
 
         elif lightOn == 'color2':
             for i in range(LED_EQ_COUNT):
-                setPixelColor(i, color2)
+                setPixelColor(i, color2, brightnessEq)
             STRIP.show()
 
         elif lightOn == 'noise_start':
@@ -516,7 +510,7 @@ if __name__ == '__main__':
     p = pyaudio.PyAudio()
     for i in range(p.get_device_count()):
         print(p.get_device_info_by_index(i))
-    setPixelColor(LED_EQ_COUNT+1, color2, 16)
+    setPixelColor(LED_EQ_COUNT + 1, color2, 16)
     STRIP.show()
 
 try:
