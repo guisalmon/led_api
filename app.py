@@ -11,7 +11,7 @@ from rpi_ws281x import *
 
 app = Flask(__name__)
 
-LED_PIN = 18  # GPIO pin connected to the pixels (18 uses PWM!).
+LED_PIN = 12  # GPIO pin connected to the pixels (18 uses PWM!).
 LED_FREQ_HZ = 800000  # LED signal frequency in hertz (usually 800khz)
 LED_DMA = 10  # DMA channel to use for generating signal (try 10)
 LED_BRIGHTNESS = 255  # Set to 0 for darkest and 255 for brightest
@@ -44,8 +44,8 @@ incrementGreen = (color1Green - color2Green) / LED_STRIPES_LENGTH
 incrementBlue = (color1Blue - color2Blue) / LED_STRIPES_LENGTH
 colorGradient = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
-POWER_PIN = 4
-SOUND_PIN = 17
+POWER_PIN = 16
+SOUND_PIN = 20
 
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(POWER_PIN, GPIO.OUT)
@@ -64,7 +64,7 @@ form_1 = pyaudio.paInt16  # 16-bit resolution
 chans = 1  # 1 channel
 samp_rate = 44100  # 44.1kHz sampling rate
 chunk = 512  # 2^12 samples for buffer
-dev_index = 1  # device index found by p.get_device_info_by_index(ii)
+dev_index = 0  # device index found by p.get_device_info_by_index(ii)
 meansMax = 0.5
 meansMin = 0
 # meansCorrection = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
@@ -167,7 +167,7 @@ def lightStripe(stripeIndex, length=LED_STRIPES_LENGTH):
 
 # Define functions which animate LEDs in various ways.
 def colorWipe(color):
-    for i in range(STRIP.numPixels()):
+    for i in range(LED_EQ_COUNT):
         setPixelColor(i, color, brightnessEq)
     STRIP.show()
 

@@ -11,9 +11,9 @@ from rpi_ws281x import *
 
 app = Flask(__name__)
 
-LED_PIN = 18  # GPIO pin connected to the pixels (18 uses PWM!).
-POWER_PIN = 4
-SOUND_PIN = 17
+LED_PIN = 12  # GPIO pin connected to the pixels (18 uses PWM!).
+POWER_PIN = 16
+SOUND_PIN = 20
 LED_FREQ_HZ = 800000  # LED signal frequency in hertz (usually 800khz)
 LED_DMA = 10  # DMA channel to use for generating signal (try 10)
 LED_BRIGHTNESS = 255  # Set to 0 for darkest and 255 for brightest
