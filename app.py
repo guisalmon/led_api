@@ -27,8 +27,10 @@ LED_COUNT = LED_EQ_COUNT + LED_CONTROL_COUNT + LED_LIGHT_COUNT + LED_LIGHT_2_COU
 # Create NeoPixel object with appropriate configuration.
 STRIP = Adafruit_NeoPixel(LED_COUNT, LED_PIN, LED_FREQ_HZ, LED_DMA, LED_INVERT, LED_BRIGHTNESS, LED_CHANNEL)
 
+ON = False
 STATES = ['dark', 'white', 'gradient', 'equalizer', 'color1', 'color2', 'noise_start', 'noise_end', "waiting"]
 state = 'dark'
+ambient = False
 
 brightnessEq = 63
 color1 = Color(175, 0, 255)
@@ -64,7 +66,7 @@ form_1 = pyaudio.paInt16  # 16-bit resolution
 chans = 1  # 1 channel
 samp_rate = 44100  # 44.1kHz sampling rate
 chunk = 512  # 2^12 samples for buffer
-dev_index = 0  # device index found by p.get_device_info_by_index(ii)
+dev_index = 1  # device index found by p.get_device_info_by_index(ii)
 meansMax = 0.5
 meansMin = 0
 # meansCorrection = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
@@ -74,7 +76,7 @@ fftCorrection = [0.0] * (int(chunk / 2))
 meanMinLvls = [10.0] * LED_STRIPES_COUNT
 meanMaxLvls = [-10.0] * LED_STRIPES_COUNT
 AUDIO_LVLS_MEM_SIZE = 1024
-autoMinMax = False
+autoMinMax = True
 
 audioMeanlvls = [[0.0] * LED_STRIPES_COUNT] * AUDIO_LVLS_MEM_SIZE
 audioMeanlvlsIndex = 0
@@ -110,17 +112,21 @@ def updateColor():
 
 
 def powerOn():
+    global ON
     GPIO.output(POWER_PIN, GPIO.LOW)
     time.sleep(50 / 1000)
     setPixelColor(LED_EQ_COUNT, color1, 16)
     STRIP.show()
+    ON = True
 
 
 def powerOff():
+    global ON
     setPixelColor(LED_EQ_COUNT, Color(0, 0, 0), 16)
     STRIP.show()
     time.sleep(50 / 1000)
     GPIO.output(POWER_PIN, GPIO.HIGH)
+    ON = False
 
 
 def setPixelColor(index, color, brightnessOverride):
@@ -292,23 +298,46 @@ def jsonConfig():
         {"freqMin": freqMin, "freqMax": freqMax, "meansMax": meansMax, "meansMin": meansMin,
          "fftCorrection": fftCorrection, "color1": rgb_to_hex(color1Red, color1Green, color1Blue),
          "color2": rgb_to_hex(color2Red, color2Green, color2Blue), "brightness": brightnessEq,
-         "meanMaxLvls": meanMaxLvls, "meanMinLvls": meanMinLvls, "autoMinMax": autoMinMax, "source": dev_index}
+         "meanMaxLvls": meanMaxLvls, "meanMinLvls": meanMinLvls, "autoMinMax": autoMinMax, "source": dev_index,
+         "on": ON, "ambient": ambient, "state": state}
     )
+
+
+@app.route('/eq/on')
+def eqOn():
+    powerOn()
+    time.sleep(1)
+    light("equalizer")
+    time.sleep(1)
+    return jsonConfig()
+
+
+@app.route('/eq/off')
+def eqOff():
+    light("dark")
+    time.sleep(1)
+    powerOff()
+    time.sleep(1)
+    return jsonConfig()
 
 
 @app.route('/ambient/on')
 def ambientOn():
+    global ambient
     for i in range(LED_EQ_COUNT + 3, LED_COUNT):
         STRIP.setPixelColor(i, Color(255, 255, 255))
     STRIP.show()
+    ambient = True
     return jsonConfig()
 
 
 @app.route('/ambient/off')
 def ambientOff():
+    global ambient
     for i in range(LED_EQ_COUNT + 3, LED_COUNT):
         STRIP.setPixelColor(i, Color(0, 0, 0))
     STRIP.show()
+    ambient = False
     return jsonConfig()
 
 
@@ -447,6 +476,8 @@ def brightness(increment):
         brightnessEq = brightnessEq - 10
         if brightnessEq < 0:
             brightnessEq = 0
+    else:
+        brightnessEq = int(increment)
     light(prevState)
     return jsonConfig()
 
@@ -456,13 +487,13 @@ def levels():
     return jsonify(memSize=AUDIO_LVLS_MEM_SIZE, audioLvls=audioMeanlvls)
 
 
-@app.route('/power/<state>')
-def power(state):
-    if state == 'on':
+@app.route('/power/<stateReq>')
+def power(stateReq):
+    if stateReq == 'on':
         powerOn()
-    elif state == 'off':
+    elif stateReq == 'off':
         powerOff()
-    return jsonify(power="state")
+    return jsonConfig()
 
 
 @app.route('/<lightOn>')
