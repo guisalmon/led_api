@@ -2,6 +2,7 @@ import math
 import threading
 import time
 import faulthandler
+import clock
 
 import RPi.GPIO as GPIO
 from gpiozero import Button
@@ -102,6 +103,16 @@ class VolumeTest(threading.Thread):
         threading.Thread.__init__(self)
         self.daemon = True
         self.runnable = test
+
+    def run(self):
+        self.runnable()
+
+
+class Clock(threading.Thread):
+    def __init__(self, clock):
+        threading.Thread.__init__(self)
+        self.daemon = True
+        self.runnable = clock
 
     def run(self):
         self.runnable()
@@ -511,6 +522,12 @@ def power(stateReq):
     return jsonConfig()
 
 
+@app.route('/clock/backlight')
+def toggle_clock_backlight():
+    clock.toggle_clock_backlight()
+    return jsonConfig()
+
+
 def volume_test():
     while state == "volume_test":
         if GPIO.input(VOL1_PIN) == 0:
@@ -575,6 +592,8 @@ if __name__ == '__main__':
         print(p.get_device_info_by_index(i))
     setPixelColor(LED_EQ_COUNT + 1, color2, 16)
     STRIP.show()
+    clock_thread = Clock(clock.clock)
+    clock_thread.start()
 
     vol1 = Button(VOL1_PIN)
     vol2 = Button(VOL2_PIN)
