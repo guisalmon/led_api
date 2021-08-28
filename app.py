@@ -325,7 +325,7 @@ def jsonConfig():
          "fftCorrection": fftCorrection, "color1": rgb_to_hex(color1Red, color1Green, color1Blue),
          "color2": rgb_to_hex(color2Red, color2Green, color2Blue), "brightness": brightnessEq,
          "meanMaxLvls": meanMaxLvls, "meanMinLvls": meanMinLvls, "autoMinMax": autoMinMax, "source": dev_index,
-         "on": ON, "ambient": ambient, "state": state}
+         "on": ON, "ambient": ambient, "state": state, "clock_backlight": clock.backlight}
     )
 
 

@@ -76,6 +76,9 @@ def toggle_clock_backlight():
         backlight = True
 
 
+def get_backlight():
+    return backlight
+
 def clock():
     while 1:
         if backlight == 1:
