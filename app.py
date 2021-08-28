@@ -4,6 +4,7 @@ import time
 import faulthandler
 
 import RPi.GPIO as GPIO
+from gpiozero import Button
 import numpy as np
 import pyaudio
 from flask import Flask, jsonify, request
@@ -28,7 +29,7 @@ LED_COUNT = LED_EQ_COUNT + LED_CONTROL_COUNT + LED_LIGHT_COUNT + LED_LIGHT_2_COU
 STRIP = Adafruit_NeoPixel(LED_COUNT, LED_PIN, LED_FREQ_HZ, LED_DMA, LED_INVERT, LED_BRIGHTNESS, LED_CHANNEL)
 
 ON = False
-STATES = ['dark', 'white', 'gradient', 'equalizer', 'color1', 'color2', 'noise_start', 'noise_end', "waiting"]
+STATES = ['dark', 'white', 'gradient', 'equalizer', 'color1', 'color2', 'noise_start', 'noise_end', "waiting", "volume_test"]
 state = 'dark'
 ambient = False
 
@@ -48,10 +49,14 @@ colorGradient = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
 POWER_PIN = 16
 SOUND_PIN = 20
+VOL1_PIN = 5
+VOL2_PIN = 6
 
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(POWER_PIN, GPIO.OUT)
 GPIO.setup(SOUND_PIN, GPIO.OUT)
+GPIO.setup(VOL1_PIN, GPIO.IN)
+GPIO.setup(VOL2_PIN, GPIO.IN)
 
 # mic sensitivity correction and bit conversion
 # mic_sens_dBV = -47.0  # mic sensitivity in dBV + any gain
@@ -87,6 +92,16 @@ class AudioSampler(threading.Thread):
         threading.Thread.__init__(self)
         self.daemon = True
         self.runnable = sampler
+
+    def run(self):
+        self.runnable()
+
+
+class VolumeTest(threading.Thread):
+    def __init__(self, test):
+        threading.Thread.__init__(self)
+        self.daemon = True
+        self.runnable = test
 
     def run(self):
         self.runnable()
@@ -496,6 +511,15 @@ def power(stateReq):
     return jsonConfig()
 
 
+def volume_test():
+    while state == "volume_test":
+        if GPIO.input(VOL1_PIN) == 0:
+            print("vol 1")
+        if GPIO.input(VOL2_PIN) == 0:
+            print("vol 2")
+        time.sleep(5)
+
+
 @app.route('/<lightOn>')
 def light(lightOn):
     global state
@@ -517,6 +541,10 @@ def light(lightOn):
             samplerThread = AudioSampler(audioSampling)
             samplerThread.start()
 
+        elif lightOn == 'volume_test':
+            volumeTest = VolumeTest(volume_test)
+            volumeTest.start()
+
         elif lightOn == 'color1':
             for i in range(LED_EQ_COUNT):
                 setPixelColor(i, color1, brightnessEq)
@@ -534,6 +562,10 @@ def light(lightOn):
     return jsonify(state=state)
 
 
+def printVol(index):
+    print("Vol "+index)
+
+
 if __name__ == '__main__':
     # Intialize the library (must be called once before other functions).
     STRIP.begin()
@@ -543,6 +575,11 @@ if __name__ == '__main__':
         print(p.get_device_info_by_index(i))
     setPixelColor(LED_EQ_COUNT + 1, color2, 16)
     STRIP.show()
+
+    vol1 = Button(VOL1_PIN)
+    vol2 = Button(VOL2_PIN)
+    vol1.when_pressed = printVol("1")
+    vol2.when_pressed = printVol("2")
 
 try:
     app.run(debug=False, host='0.0.0.0')
