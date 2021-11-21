@@ -22,8 +22,8 @@ LED_CHANNEL = 0  # set to '1' for GPIOs 13, 19, 41, 45 or 53
 LED_STRIPES_LENGTH = 10
 LED_STRIPES_COUNT = 12
 LED_CONTROL_COUNT = 2
-LED_LIGHT_COUNT = 20
-LED_LIGHT_2_COUNT = 8
+LED_LIGHT_COUNT = 10
+LED_LIGHT_2_COUNT = 0
 LED_EQ_COUNT = LED_STRIPES_LENGTH * LED_STRIPES_COUNT
 LED_COUNT = LED_EQ_COUNT + LED_CONTROL_COUNT + LED_LIGHT_COUNT + LED_LIGHT_2_COUNT  # Number of LED pixels.
 # Create NeoPixel object with appropriate configuration.
@@ -327,6 +327,22 @@ def jsonConfig():
          "meanMaxLvls": meanMaxLvls, "meanMinLvls": meanMinLvls, "autoMinMax": autoMinMax, "source": dev_index,
          "on": ON, "ambient": ambient, "state": state, "clock_backlight": clock.backlight}
     )
+
+
+@app.route('/test/on')
+def testOn():
+    for i in range(0, 18):
+        STRIP.setPixelColor(i, Color(255, 255, 255))
+    STRIP.show()
+    return jsonConfig()
+
+
+@app.route('/test/off')
+def testOff():
+    for i in range(0, 10):
+        STRIP.setPixelColor(i, Color(0, 0, 0))
+    STRIP.show()
+    return jsonConfig()
 
 
 @app.route('/eq/on')

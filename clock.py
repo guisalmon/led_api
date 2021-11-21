@@ -24,7 +24,9 @@ digitset = [
     [4, 2, 2, 5, 4, 3, 3, 0, 4, 0, 0, 5, 4, 3, 3, 5],
     [4, 2, 2, 5, 0, 0, 0, 5, 0, 0, 0, 5, 0, 0, 0, 5],
     [4, 2, 2, 5, 4, 3, 3, 5, 4, 0, 0, 5, 4, 3, 3, 5],
-    [4, 2, 2, 5, 4, 3, 3, 5, 0, 0, 0, 5, 4, 3, 3, 5]
+    [4, 2, 2, 5, 4, 3, 3, 5, 0, 0, 0, 5, 4, 3, 3, 5],
+    [4, 2, 2, 5, 4, 3, 3, 5, 4, 0, 0, 5, 4, 0, 0, 5],
+    [4, 2, 2, 5, 4, 0, 0, 0, 4, 0, 0, 0, 4, 3, 3, 5]
 ]
 
 digitset_bold = [
@@ -101,14 +103,22 @@ def clock():
             dt = now.strftime("%d")
             month_t = now.strftime("%m")
             yt = now.strftime("%Y")
-            if h != ht:
-                write_number(int(ht[0]), 0)
-                write_number(int(ht[1]), 1)
+            if h != ht and h == "13" and m != mt and m == "12":
+                write_number(10, 0)
+                write_number(11, 1)
+                write_number(10, 2)
+                write_number(8, 3)
                 h = ht
-            if m != mt:
-                write_number(int(mt[0]), 2)
-                write_number(int(mt[1]), 3)
                 m = mt
+            else:
+                if h != ht:
+                    write_number(int(ht[0]), 0)
+                    write_number(int(ht[1]), 1)
+                    h = ht
+                if m != mt:
+                    write_number(int(mt[0]), 2)
+                    write_number(int(mt[1]), 3)
+                    m = mt
             if d != dt:
                 lcd.lcd_display_string_pos(dt, 1, 0)
                 d = dt
